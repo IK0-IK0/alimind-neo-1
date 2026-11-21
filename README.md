@@ -324,6 +324,18 @@ platform's assigned port, and `TRUST_PROXY=true` only when deployed behind a
 trusted reverse proxy. The frontend and Express API should share one origin.
 Keep `.env` out of source control.
 
+### Deploying to Vercel
+
+The root `vercel.json` config builds the Vite frontend into `dist`, serves the
+client-side app routes, and the `api/[...path].ts` function forwards `/api/*`
+requests to the existing Express app. Set `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_PUBLISHABLE_KEY` in Vercel for the build and runtime. Also set
+`APP_ORIGIN` to the production HTTPS URL when using a custom domain; Vercel's
+deployment and production URLs are allowed automatically. Set server-only
+provider secrets such as `SPOONACULAR_API_KEY` only in Vercel's runtime
+environment. After pushing these changes, the connected Vercel Git project
+should create a new deployment.
+
 ### Environment variables
 
 | Variable | Required | Default | Description |
@@ -333,7 +345,7 @@ Keep `.env` out of source control.
 | `SPOONACULAR_API_KEY` | For recipe search | — | Server-only Spoonacular key. Never expose it to the browser. |
 | `USD_TO_PHP_FALLBACK_RATE` | No | `63.251` | Server-only fallback USD/PHP rate used when the daily Frankfurter quote cannot be fetched. |
 | `USD_TO_PHP_FALLBACK_DATE` | No | `2026-11-11` | Date for the configured fallback rate, in `YYYY-MM-DD` form. |
-| `APP_ORIGIN` | No | `http://localhost:5173` | Allowed origin for state-changing API requests. |
+| `APP_ORIGIN` | No | `http://localhost:5173` locally | Allowed origin for state-changing API requests; configure the production HTTPS URL when using a custom domain. |
 | `PORT` | No | `3001` | Express API/production server port. |
 | `TRUST_PROXY` | No | `false` | Trust one reverse proxy only when explicitly configured. |
 

@@ -23,7 +23,8 @@ Environment
 
 Safety and scope
 - Use only approved synthetic/test submissions. Do not open real participant
-  records or enter personal or sensitive health information.
+  recods or enter personal or sensitive health information.
+
 - Do not use /reviewer-sample as evidence for live queue behavior: it is
   fabricated demo content and its drafts/statuses are not connected to live
   review records.

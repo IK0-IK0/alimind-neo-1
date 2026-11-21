@@ -55,11 +55,21 @@ type UserContext = {
 
 const app = express();
 const port = Number(process.env.PORT ?? 3001);
-const appOrigin = process.env.APP_ORIGIN ?? "http://localhost:5173";
 const localOrigins = process.env.NODE_ENV === "production"
   ? []
   : ["http://localhost:5173", "http://127.0.0.1:5173"];
-const allowedOrigins = new Set([appOrigin, ...localOrigins]);
+const vercelOrigins = [
+  process.env.VERCEL_URL,
+  process.env.VERCEL_PROJECT_PRODUCTION_URL,
+]
+  .filter((host): host is string => Boolean(host))
+  .map((host) => `https://${host}`);
+const allowedOrigins = new Set([
+  ...[process.env.APP_ORIGIN, ...vercelOrigins].filter(
+    (origin): origin is string => Boolean(origin),
+  ),
+  ...localOrigins,
+]);
 const root = resolve(import.meta.dirname, "..");
 const consentVersion = "demo-supabase-v1";
 const reviewerPageSize = 25;
@@ -1375,14 +1385,18 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   sendError(res, 500, "The request could not be completed. Please try again.");
 });
 
-const server = app.listen(port, () => {
-  console.info(`AliMind API listening on http://localhost:${port}; Supabase: ${process.env.VITE_SUPABASE_URL}`);
-});
+export default app;
 
-function closeServer() {
-  stopTpbAnswerScorer();
-  server.close(() => process.exit(0));
+if (process.env.VERCEL !== "1") {
+  const server = app.listen(port, () => {
+    console.info(`AliMind API listening on http://localhost:${port}; Supabase: ${process.env.VITE_SUPABASE_URL}`);
+  });
+
+  function closeServer() {
+    stopTpbAnswerScorer();
+    server.close(() => process.exit(0));
+  }
+
+  process.on("SIGINT", closeServer);
+  process.on("SIGTERM", closeServer);
 }
-
-process.on("SIGINT", closeServer);
-process.on("SIGTERM", closeServer);
