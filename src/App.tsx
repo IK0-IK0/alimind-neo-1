@@ -881,10 +881,20 @@ function DashboardPage() {
   const activeAssessment = assessments.find((assessment) => assessment.status === "in_progress");
   const completedCount = assessments.filter((assessment) => assessment.status === "completed").length;
   const visibleAssessments = assessments.filter((assessment, index) =>
-    index < 4 || assessment.reviewDelivery !== null,
+    index < 4 || assessment.status === "completed",
   );
   const latestAssessment = assessments[0];
   const assessmentAction = activeAssessment ? "Resume reflection" : error ? "Open reflections" : "Start reflection";
+  const sessionProfile = sessionDetail
+    ? calculateProfile(QUESTIONS, sessionDetail.answers)
+    : null;
+  const sessionScoreRows = sessionProfile
+    ? [
+        ["Attitude", sessionProfile.scores.attitude],
+        ["Subjective norm", sessionProfile.scores.subjectiveNorm],
+        ["Perceived control", sessionProfile.scores.perceivedControl],
+      ] as const
+    : [];
 
   return (
     <>
@@ -924,10 +934,14 @@ function DashboardPage() {
             {!loading && !error && assessments.length === 0 && <div className="dashboard-empty"><span><Leaf size={19} /></span><div><strong>No reflections yet.</strong><p>Your first one will appear here when you’re ready.</p></div><Link className="button button-small button-dark" to="/demo">Start <ArrowRight size={14} /></Link></div>}
             {!loading && !error && visibleAssessments.map((assessment) => (
               <article className="dashboard-recent-item" key={assessment.id}>
-                <span className={`history-status status-${assessment.status}`}>{assessment.status.replace("_", " ")}</span>
+                <span className={`history-status status-${assessment.status}`}>
+                  {assessment.status === "completed"
+                    ? assessment.reviewDelivery ? "Reviewed" : "To be reviewed"
+                    : assessment.status.replace("_", " ")}
+                </span>
                 <div><strong>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(assessment.startedAt))}</strong><small>{assessment.answered} of 20 responses · private reflection</small></div>
-                {assessment.reviewDelivery ? (
-                  <Button variant="outline" size="sm" onClick={() => void openSessionResults(assessment)}>View session results</Button>
+                {assessment.status === "completed" ? (
+                  <Button variant="outline" size="sm" onClick={() => void openSessionResults(assessment)}>View session details</Button>
                 ) : assessment.status === "in_progress" ? (
                   <Link className="dashboard-resume-link" to="/demo" aria-label={`Resume reflection from ${new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(assessment.startedAt))}`}><ArrowRight size={16} /></Link>
                 ) : <span />}
@@ -977,6 +991,17 @@ function DashboardPage() {
               {sessionError && <p className="form-error" role="alert">{sessionError}</p>}
               {sessionDetail && (
                 <>
+                  {sessionProfile && (
+                    <section className="dashboard-session-scores">
+                      <h3>Your scores</h3>
+                      <ul>
+                        {sessionScoreRows.map(([label, score]) => (
+                          <li key={label}><span>{label}</span><strong>{score === undefined ? "Not enough scored answers" : `${score}/100`}</strong></li>
+                        ))}
+                      </ul>
+                      <p>Readiness: {sessionProfile.stage ?? "Not enough scored answers"}</p>
+                    </section>
+                  )}
                   {sessionTarget.reviewDelivery && (
                     <section className="dashboard-session-delivery">
                       <h3>Message from your reviewer</h3>
