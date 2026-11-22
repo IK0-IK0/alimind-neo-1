@@ -25,8 +25,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "../../components/ui/primitives";
-import { apiRequest } from "../../lib/api";
-import { isAccountRole } from "../accounts/roles";
+import { loadAccountRole } from "../accounts/account-data";
 import {
   PILOT_ADDITIONAL_QUESTIONS,
   PILOT_TPB_QUESTIONS,
@@ -187,17 +186,20 @@ function SampleReviewerWorkspacePage() {
       setAccess("allowed");
       return;
     }
+    if (!user) {
+      setAccessError("Please sign in to access the reviewer workspace.");
+      setAccess("error");
+      return;
+    }
     let active = true;
     void (async () => {
       try {
-        const { role } = await apiRequest<{ role: unknown }>("/api/account/role");
+        const role = await loadAccountRole(user.id);
         if (!active) return;
-        if (!isAccountRole(role)) throw new Error("The server returned an unknown account role.");
         if (role !== "reviewer") {
           setAccess("denied");
           return;
         }
-        await apiRequest<{ allowed: true }>("/api/reviewer/access");
         if (active) setAccess("allowed");
       } catch (requestError) {
         if (!active) return;
@@ -210,7 +212,7 @@ function SampleReviewerWorkspacePage() {
       }
     })();
     return () => { active = false; };
-  }, [sampleMode]);
+  }, [sampleMode, user]);
 
   function chooseCase(sampleCase: SampleCase) {
     setReviewDraftStorageError(saveBrowserReviewDrafts(reviewDraftsByCase));

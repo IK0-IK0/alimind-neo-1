@@ -1,26 +1,28 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight, LoaderCircle, ShieldCheck, UserRound } from "lucide-react";
-import { apiRequest } from "../../lib/api";
+import { useAuth } from "../../auth/AuthProvider";
 import { Badge, Button, Card } from "../../components/ui/primitives";
-import { isAccountRole, type AccountRole } from "./roles";
+import { loadAccountRole } from "./account-data";
+import type { AccountRole } from "./roles";
 
 export default function AccountAccessPage() {
+  const { user } = useAuth();
   const [role, setRole] = useState<AccountRole | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (!user) return;
     let active = true;
-    void apiRequest<{ role: unknown }>("/api/account/role")
-      .then(({ role: accountRole }) => {
-        if (!isAccountRole(accountRole)) throw new Error("The server returned an unknown account role.");
+    void loadAccountRole(user.id)
+      .then((accountRole) => {
         if (active) setRole(accountRole);
       })
       .catch((requestError: unknown) => {
         if (active) setError(requestError instanceof Error ? requestError.message : "Could not load this account's role.");
       });
     return () => { active = false; };
-  }, []);
+  }, [user]);
 
   return (
     <main className="account-access-page">

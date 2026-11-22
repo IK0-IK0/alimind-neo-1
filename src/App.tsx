@@ -39,6 +39,13 @@ import {
   type Profile,
 } from "./features/assessment/scoring";
 import {
+  loadActiveAssessment,
+  loadAssessmentDetail,
+  loadAssessmentHistory,
+  type AssessmentSessionDetail,
+  type AssessmentSummary,
+} from "./features/assessment/assessment-data";
+import {
   PILOT_ADDITIONAL_QUESTIONS,
   PILOT_TTM_QUESTIONS,
   type PilotAdditionalQuestion,
@@ -743,33 +750,6 @@ function AuthPage({ mode }: { mode: "login" | "register" }) {
   );
 }
 
-type AssessmentSummary = {
-  id: string;
-  status: "in_progress" | "completed" | "abandoned";
-  answered: number;
-  total: number;
-  consentVersion: string;
-  startedAt: string;
-  updatedAt: string;
-  completedAt: string | null;
-  reviewDelivery: {
-    deliveredAt: string;
-    response: string;
-    recommendation: string;
-    recipe: string;
-  } | null;
-};
-
-type AssessmentSessionDetail = {
-  id: string;
-  status: "in_progress" | "completed" | "abandoned";
-  questionOrder: string[];
-  answers: Answer[];
-  messages: Array<{ id: string; sender: "bot" | "user"; text: string }>;
-  startedAt: string;
-  completedAt: string | null;
-};
-
 function getAssessmentQuestionPrompt(questionId: string) {
   return QUESTIONS.find((question) => question.id === questionId)?.prompt
     ?? PILOT_TTM_QUESTIONS.find((question) => question.id === questionId)?.prompt
@@ -858,8 +838,8 @@ function DashboardPage() {
         setProfileError(requestError instanceof Error ? requestError.message : "The saved profile could not be loaded.");
       }
     })();
-    void apiRequest<{ assessments: AssessmentSummary[] }>("/api/assessments")
-      .then(({ assessments: records }) => {
+    void loadAssessmentHistory(user.id)
+      .then((records) => {
         if (active) setAssessments(records);
       })
       .catch((requestError: unknown) => {
@@ -878,9 +858,8 @@ function DashboardPage() {
     setSessionLoading(true);
     setSessionError("");
     try {
-      const { assessment: detail } = await apiRequest<{ assessment: AssessmentSessionDetail }>(
-        `/api/assessments/${assessment.id}`,
-      );
+      if (!user) throw new Error("Please sign in to access your assessment.");
+      const detail = await loadAssessmentDetail(assessment.id, user.id);
       setSessionDetail(detail);
     } catch (requestError) {
       setSessionError(requestError instanceof Error ? requestError.message : "Could not load this session’s results.");
@@ -1078,6 +1057,7 @@ function AuthGate({ returnTo = "/demo" }: { returnTo?: "/demo" | "/dashboard" })
 
 function DemoPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [questions, setQuestions] = useState<LiveQuestion[]>(createLiveQuestionPool);
   const [answers, setAnswers] = useState<Answer[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([{ id: 0, sender: "bot", text: "" }]);
@@ -1121,14 +1101,12 @@ function DemoPage() {
 
   useEffect(() => {
     let active = true;
-    void apiRequest<{ assessment: {
-      id: string;
-      questionOrder: string[];
-      answers: Answer[];
-      messages: ChatMessage[];
-      status: "in_progress";
-    } | null }>("/api/assessments/active")
-      .then(({ assessment }) => {
+    if (!user) {
+      setIsLoadingAssessment(false);
+      return () => { active = false; };
+    }
+    void loadActiveAssessment(user.id)
+      .then((assessment) => {
         if (!active || !assessment) return;
         const liveQuestions: LiveQuestion[] = [
           ...QUESTIONS,
@@ -1171,7 +1149,7 @@ function DemoPage() {
         if (active) setIsLoadingAssessment(false);
       });
     return () => { active = false; };
-  }, []);
+  }, [user]);
 
   useEffect(() => () => {
     if (typingTimer.current !== null) window.clearTimeout(typingTimer.current);

@@ -18,6 +18,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { useAuth } from "../../auth/AuthProvider";
 import {
   Badge,
   Button,
@@ -27,64 +28,24 @@ import {
   DialogDescription,
   DialogTitle,
 } from "../../components/ui/primitives";
+import { loadAccountRole } from "../accounts/account-data";
 import { apiRequest } from "../../lib/api";
 import {
   groupReviewerQuestionAnswers,
   type ReviewerProfileSummary,
   type ReviewerQuestionAnswer,
 } from "./reviewer-assessment";
+import {
+  loadReviewerAssessmentDetail,
+  loadReviewerAssessmentQueue,
+  type Assignment,
+  type QueueAssessment,
+  type ReviewRecord,
+  type ReviewStatus,
+  type ReviewerAssessmentDetail,
+} from "./reviewer-data";
 import ReviewerRecipePicker from "./ReviewerRecipePicker";
 import { formatRecipeRecommendation } from "./reviewer-recipes";
-
-type ReviewStatus = "needs_review" | "in_progress" | "completed";
-type Assignment = "you" | "another_reviewer" | null;
-
-interface QueueAssessment {
-  id: string;
-  submittedAt: string;
-  answered: number;
-  total: number;
-  reviewStatus: ReviewStatus;
-  assignment: Assignment;
-  profile: ReviewerProfileSummary | null;
-}
-
-interface QueueResponse {
-  assessments: QueueAssessment[];
-  page: number;
-  pageSize: number;
-  total: number;
-}
-
-interface ReviewerMessage {
-  id: string;
-  sender: "bot" | "user";
-  text: string;
-}
-
-interface ReviewRecord {
-  status: Exclude<ReviewStatus, "needs_review">;
-  assignment: Assignment;
-  responseDraft?: string;
-  recommendationDraft?: string;
-  selectedRecipe?: string;
-  updatedAt: string;
-  completedAt: string | null;
-  deliveredAt: string | null;
-}
-
-interface ReviewerAssessmentDetail {
-  assessment: {
-    id: string;
-    submittedAt: string;
-    answered: number;
-    total: number;
-    messages: ReviewerMessage[];
-    questionAnswers: ReviewerQuestionAnswer[];
-    profile: ReviewerProfileSummary | null;
-  };
-  review: ReviewRecord | null;
-}
 
 type AccessState = "checking" | "allowed" | "denied" | "error";
 type DraftSaveState = "saved" | "pending" | "saving" | "error";
@@ -129,6 +90,7 @@ function profileWeakest(profile: ReviewerProfileSummary | null) {
 }
 
 export default function LiveReviewerAssessmentsPage() {
+  const { user } = useAuth();
   const [access, setAccess] = useState<AccessState>("checking");
   const [accessError, setAccessError] = useState("");
   const [queue, setQueue] = useState<QueueAssessment[]>([]);
@@ -161,9 +123,14 @@ export default function LiveReviewerAssessmentsPage() {
 
   useEffect(() => {
     let active = true;
-    void apiRequest<{ allowed: true }>("/api/reviewer/access")
-      .then(() => {
-        if (active) setAccess("allowed");
+    if (!user) {
+      setAccessError("Please sign in to access the reviewer workspace.");
+      setAccess("error");
+      return () => { active = false; };
+    }
+    void loadAccountRole(user.id)
+      .then((role) => {
+        if (active) setAccess(role === "reviewer" ? "allowed" : "denied");
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -176,15 +143,15 @@ export default function LiveReviewerAssessmentsPage() {
         setAccess("error");
       });
     return () => { active = false; };
-  }, []);
+  }, [user]);
 
   useEffect(() => {
-    if (access !== "allowed") return;
+      if (access !== "allowed" || !user) return;
     let active = true;
     setQueueLoading(true);
     setQueueError("");
-    void apiRequest<QueueResponse>(`/api/reviewer/assessments?page=${page}`)
-      .then((result) => {
+      void loadReviewerAssessmentQueue(page, user.id)
+        .then((result) => {
         if (!active) return;
         setQueue(result.assessments);
         setTotal(result.total);
@@ -196,7 +163,7 @@ export default function LiveReviewerAssessmentsPage() {
         if (active) setQueueLoading(false);
       });
     return () => { active = false; };
-  }, [access, page, queueReloadKey]);
+  }, [access, page, queueReloadKey, user]);
 
   const persistDraft = useCallback(
     (assessmentId: string, response: string, recommendation: string, recipe: string) => {
@@ -284,7 +251,8 @@ export default function LiveReviewerAssessmentsPage() {
   }
 
   async function fetchDetail(id: string) {
-    return apiRequest<ReviewerAssessmentDetail>(`/api/reviewer/assessments/${id}`);
+    if (!user) throw new Error("Please sign in to access the reviewer workspace.");
+    return loadReviewerAssessmentDetail(id, user.id);
   }
 
   async function openSubmissionDetails(id: string) {

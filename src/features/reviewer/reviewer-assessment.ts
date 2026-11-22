@@ -8,6 +8,7 @@ import {
   type Answer,
   type Profile,
 } from "../assessment/scoring";
+import { classifyTtmStage, createTtmAnswersFromResponses } from "../pipeline/ttm";
 
 export interface ReviewerQuestionAnswer {
   questionId: string;
@@ -61,6 +62,16 @@ export function summarizeReviewerProfile(profile: Profile | null): ReviewerProfi
     answered: profile.answered,
     total: profile.total,
   };
+}
+
+export function getReviewerProfileSummary(
+  questionOrder: readonly string[],
+  answers: readonly Answer[],
+): ReviewerProfileSummary | null {
+  const profile = summarizeReviewerProfile(calculateReviewerProfile(questionOrder, answers));
+  if (!profile) return null;
+  const ttm = classifyTtmStage(createTtmAnswersFromResponses(answers));
+  return { ...profile, stage: ttm.status === "classified" ? ttm.stage : null };
 }
 
 export function getReviewerQuestionAnswers(
