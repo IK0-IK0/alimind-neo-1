@@ -23,11 +23,8 @@ import {
 } from "../src/features/assessment/scoring.js";
 import {
   calculateReviewerProfile,
-  getReviewerQuestionAnswers,
-  summarizeReviewerProfile,
 } from "../src/features/reviewer/reviewer-assessment.js";
 import { getReviewerGuidanceFromProfile } from "../src/features/reviewer/reviewer-guidance.js";
-import { classifyTtmStage, createTtmAnswersFromResponses } from "../src/features/pipeline/ttm.js";
 import { TPB_Q1_SYNTHETIC_REFERENCE_GROUPS } from "../src/features/assessment/tpb-q1-synthetic-references.js";
 import {
   generateRecipes,
@@ -72,7 +69,6 @@ const allowedOrigins = new Set([
 ]);
 const root = resolve(import.meta.dirname, "..");
 const consentVersion = "demo-supabase-v1";
-const reviewerPageSize = 25;
 
 app.disable("x-powered-by");
 app.set("trust proxy", process.env.TRUST_PROXY === "true" ? 1 : false);
@@ -211,42 +207,9 @@ function getReviewerProfile(questionOrder: string[], answers: Json) {
   return calculateReviewerProfile(questionOrder, arrayFromJson<Answer>(answers, "answer"));
 }
 
-function getReviewerProfileSummary(questionOrder: string[], answers: Json) {
-  const parsedAnswers = arrayFromJson<Answer>(answers, "answer");
-  const profile = summarizeReviewerProfile(getReviewerProfile(questionOrder, answers));
-  if (!profile) return null;
-  const ttm = classifyTtmStage(createTtmAnswersFromResponses(parsedAnswers));
-  return { ...profile, stage: ttm.status === "classified" ? ttm.stage : null };
-}
-
-function getApplicableQuestionCount(questionOrder: string[], answers: readonly Answer[]) {
-  const answerById = new Map(answers.map((answer) => [answer.questionId, answer]));
-  return questionOrder.filter((questionId) => {
-    const question = PILOT_TTM_QUESTIONS.find((item) => item.id === questionId);
-    const dependency = question?.dependsOn;
-    if (!dependency) return true;
-    const dependencyId = `pilot-ttm-${String(dependency.questionNumber).padStart(2, "0")}`;
-    const dependencyQuestion = PILOT_TTM_QUESTIONS.find((item) => item.id === dependencyId);
-    if (dependencyQuestion?.dependsOn) {
-      const ancestorId = `pilot-ttm-${String(dependencyQuestion.dependsOn.questionNumber).padStart(2, "0")}`;
-      const ancestorResponse = answerById.get(ancestorId)?.response?.trim().toLowerCase();
-      if (
-        ancestorResponse !== undefined &&
-        ancestorResponse !== (dependencyQuestion.dependsOn.answer ? "yes" : "no")
-      ) return false;
-    }
-    const response = answerById.get(dependencyId)?.response?.trim().toLowerCase();
-    return response === undefined || response === (dependency.answer ? "yes" : "no");
-  }).length;
-}
-
 function getReviewAssignment(review: AssessmentReviewRecord | undefined, reviewerId: string) {
   if (!review) return null;
   return review.reviewer_id === reviewerId ? "you" : "another_reviewer";
-}
-
-function getReviewStatus(review: AssessmentReviewRecord | undefined) {
-  return review?.status ?? "needs_review";
 }
 
 async function getReviewDrafts(client: UserSupabaseClient, assessmentId: string) {

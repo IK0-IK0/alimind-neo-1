@@ -74,7 +74,7 @@ import { useAuth } from "./auth/AuthProvider";
 import { getAuthClient, getSupabaseClient } from "./auth/client";
 import { apiRequest } from "./lib/api";
 
-type ChatMessage = { id: number; sender: "bot" | "user"; text: string };
+type ChatMessage = { id: number | string; sender: "bot" | "user"; text: string };
 type LiveQuestion = Question | PilotTtmQuestion | PilotAdditionalQuestion;
 type AutomatedScoringTestResult = {
   profile: Profile;
