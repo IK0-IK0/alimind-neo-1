@@ -16,10 +16,15 @@ describe("assessment scoring", () => {
     expect(scoreResponse(item, "That is an importantance to consider")).toBeNull();
   });
 
-  it("keeps skipped and unmatched responses missing instead of neutral", () => {
+  it("keeps skipped responses missing and scores unmatched responses at the midpoint", () => {
     const item = QUESTIONS[0];
     expect(makeAnswer(item, "skip").score).toBeNull();
-    expect(makeAnswer(item, "I have no idea at all").score).toBeNull();
+    expect(makeAnswer(item, "I have no idea at all").score).toBe(50);
+    const attitude = QUESTIONS.filter(({ construct }) => construct === "attitude").slice(0, 3);
+    expect(calculateProfile(
+      QUESTIONS,
+      attitude.map((question) => makeAnswer(question, "I have no idea at all")),
+    ).scores.attitude).toBe(50);
     expect(calculateProfile(QUESTIONS, []).scores.attitude).toBeUndefined();
   });
 

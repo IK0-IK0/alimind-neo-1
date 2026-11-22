@@ -5,7 +5,7 @@ import {
   PILOT_TTM_QUESTIONS,
 } from "../../data/pilot-survey-questions";
 import { arrayFromJson } from "../../lib/supabase/json";
-import type { AssessmentRecord } from "../../lib/supabase/types";
+import type { AssessmentRecord, Json } from "../../lib/supabase/types";
 import { getApplicableQuestionCount } from "./assessment-progress";
 import { makeAnswer, type Answer } from "./scoring";
 
@@ -48,6 +48,51 @@ export type ActiveAssessment = {
 
 export const ASSESSMENT_CONSENT_VERSION = "demo-supabase-v1";
 
+export function recalculateMissingKeywordScores(answers: Answer[]) {
+  let changed = false;
+  const updatedAnswers = answers.map((answer) => {
+    if (
+      answer.score != null ||
+      typeof answer.response !== "string" ||
+      !answer.response.trim() ||
+      answer.tpbModelRating != null
+    ) {
+      return answer;
+    }
+    const question = QUESTIONS.find((item) => item.id === answer.questionId);
+    if (!question) return answer;
+    const recalculated = makeAnswer(question, answer.response);
+    if (recalculated.score === null) return answer;
+    changed = true;
+    return { ...answer, score: recalculated.score };
+  });
+  return { answers: updatedAnswers, changed };
+}
+
+async function persistMissingKeywordScores(
+  row: AssessmentRecord,
+  userId: string,
+): Promise<AssessmentRecord> {
+  const { answers, changed } = recalculateMissingKeywordScores(
+    arrayFromJson<Answer>(row.answers, "answer"),
+  );
+  if (!changed) return row;
+
+  const { data, error } = await getSupabaseClient()
+    .from("assessment_sessions")
+    .update({ answers: answers as Json })
+    .eq("id", row.id)
+    .eq("user_id", userId)
+    .eq("updated_at", row.updated_at)
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new Error("This assessment changed while its missing scores were being recalculated. Refresh and try again.");
+  }
+  return data;
+}
+
 function mapAssessment(row: AssessmentRecord): ActiveAssessment {
   return {
     id: row.id,
@@ -61,7 +106,11 @@ function mapAssessment(row: AssessmentRecord): ActiveAssessment {
 export async function createAssessment(
   userId: string,
   questionOrder: string[],
+  consentAccepted: boolean,
 ): Promise<ActiveAssessment> {
+  if (!consentAccepted) {
+    throw new Error("Please accept the current data-storage consent before continuing.");
+  }
   const tpbQuestionIds = new Set(QUESTIONS.map((question) => question.id));
   const knownQuestionIds = new Set([
     ...tpbQuestionIds,
@@ -444,15 +493,16 @@ export async function loadAssessmentDetail(
     .maybeSingle();
   if (error) throw error;
   if (!data) throw new Error("Assessment not found.");
+  const row = await persistMissingKeywordScores(data, userId);
 
   return {
-    id: data.id,
-    status: data.status,
-    questionOrder: data.question_order,
-    answers: arrayFromJson<Answer>(data.answers, "answer"),
-    messages: arrayFromJson<StoredMessage>(data.messages, "message"),
-    startedAt: data.started_at,
-    completedAt: data.completed_at,
+    id: row.id,
+    status: row.status,
+    questionOrder: row.question_order,
+    answers: arrayFromJson<Answer>(row.answers, "answer"),
+    messages: arrayFromJson<StoredMessage>(row.messages, "message"),
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
   };
 }
 
@@ -469,18 +519,26 @@ export async function loadActiveAssessment(userId: string): Promise<ActiveAssess
   if (error) throw error;
   if (!active) return null;
 
-  if (
+  const shouldUpgradeQuestionOrder =
     active.question_order.length === QUESTIONS.length &&
-    active.question_order.every((questionId) => QUESTIONS.some((question) => question.id === questionId))
-  ) {
-    const questionOrder = [
+    active.question_order.every((questionId) => QUESTIONS.some((question) => question.id === questionId));
+  const questionOrder = shouldUpgradeQuestionOrder
+    ? [
       ...active.question_order,
       ...PILOT_TTM_QUESTIONS.map((question) => question.id),
       ...PILOT_ADDITIONAL_QUESTIONS.map((question) => question.id),
-    ];
+    ]
+    : active.question_order;
+  const currentAnswers = arrayFromJson<Answer>(active.answers, "answer");
+  const recalculated = recalculateMissingKeywordScores(currentAnswers);
+  if (shouldUpgradeQuestionOrder || recalculated.changed) {
     const { data: upgraded, error: upgradeError } = await client
       .from("assessment_sessions")
-      .update({ question_order: questionOrder, updated_at: new Date().toISOString() })
+      .update({
+        ...(shouldUpgradeQuestionOrder ? { question_order: questionOrder } : {}),
+        ...(recalculated.changed ? { answers: recalculated.answers as Json } : {}),
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", active.id)
       .eq("user_id", userId)
       .eq("status", "in_progress")

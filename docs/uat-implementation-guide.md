@@ -13,11 +13,9 @@ line numbers can move as the app changes.
 2. Obtain an approved synthetic submission for reviewer testing. Do not start
    a participant assessment on shared or production data merely to populate
    the queue.
-3. If running locally, the `/demo` page has a **Local scoring test** control in
-   development mode. It creates and submits a synthetic assessment; use it
-   only when explicitly approved as test-data setup. The relevant control and
-   request are in [App.tsx](../src/App.tsx#L1263) and its UI in
-   [App.tsx](../src/App.tsx#L1420).
+3. If running locally, the `/demo` page has a development-only **Run automated
+   test** control. It previews a synthetic conversation without creating or
+   modifying a saved assessment.
 4. Do not use `/reviewer-sample` to accept the live reviewer queue. It is a
    separate, fabricated UI with browser-local drafts. The route and mode split
    are in [App.tsx](../src/App.tsx#L1591) and
@@ -34,10 +32,9 @@ and [server/index.ts](../server/index.ts#L98).
 
 ### R1. Sign in and open the reviewer workspace
 
-- **What happens:** Authentication is performed by Supabase. A signed-in
-  account can load the `/reviewer` route, but the live workspace also calls
-  `/api/reviewer/access`; the server checks `profiles.account_role` and returns
-  a forbidden response for a participant account.
+- **What happens:** Authentication is performed by Supabase. The live
+  workspace reads `profiles.account_role` through the authenticated Supabase
+  client; RLS controls access to reviewer-scoped data.
 - **Check:** The designated reviewer reaches **Submitted assessments**. If
   checking reviewer access fails or a non-reviewer reaches the queue, record
   the role, route, and visible error. Do not change the account role to make
@@ -52,7 +49,7 @@ and [server/index.ts](../server/index.ts#L98).
 
 ### R2. Inspect a submission and its answers
 
-- **What happens:** The queue endpoint returns completed assessment records,
+- **What happens:** Supabase queries return completed assessment records,
   shortened IDs, timestamps, answer totals, review status/assignment, and
   provisional profile summaries. **View submission** fetches a detail record,
   which includes the saved chat messages and question/answer pairs. The
@@ -162,7 +159,7 @@ and [server/index.ts](../server/index.ts#L98).
 
 ### R8. Verify participant delivery and privacy
 
-- **What happens:** The participant assessment-list endpoint joins delivered
+- **What happens:** The participant assessment-list query joins delivered
   reviews to their response/recommendation/recipe drafts. The dashboard shows
   those participant-facing fields and a **View session results** dialog with
   answers/transcript. Drafts are internal while a review is in progress; the
@@ -173,7 +170,8 @@ and [server/index.ts](../server/index.ts#L98).
   and only in that participant's history. Confirm another test participant
   cannot see it, and that no separate reviewer-only notes are exposed.
 - **Code:** Participant-owned assessment list and delivery data:
-  [server/index.ts](../server/index.ts#L918). Participant dashboard and result
+  [assessment-data.ts](../src/features/assessment/assessment-data.ts) and
+  [App.tsx](../src/App.tsx). Participant dashboard and result
   dialog: [App.tsx](../src/App.tsx#L824). Reviewer draft visibility rule:
   [server/index.ts](../server/index.ts#L334).
 
@@ -196,43 +194,41 @@ and [server/index.ts](../server/index.ts#L98).
 
 ### P2. Sign in and verify participant role/access
 
-- **What happens:** `/account` displays the role returned by
-  `/api/account/role`. `/demo` is gated by sign-in. API reads are associated
-  with the authenticated user; the reviewer endpoint applies an additional
-  role check.
+- **What happens:** `/account` reads the signed-in user's role from Supabase.
+  `/demo` is gated by sign-in. Participant assessment rows are scoped by RLS;
+  reviewer access is further scoped by reviewer policies.
 - **Check:** Confirm the paired account shows **Participant**. If doing an
   access-control check, try only the approved participant account and confirm
   reviewer API access is denied. Do not enumerate or attempt to read another
   user's records.
-- **Code:** Account UI:
-  [AccountAccessPage.tsx](../src/features/accounts/AccountAccessPage.tsx#L8).
-  Role endpoint and reviewer authorization:
-  [server/index.ts](../server/index.ts#L98). Protected routes:
+- **Code:** Account UI and role read:
+  [AccountAccessPage.tsx](../src/features/accounts/AccountAccessPage.tsx#L8)
+  and [account-data.ts](../src/features/accounts/account-data.ts).
+  Protected routes:
   [App.tsx](../src/App.tsx#L1044) and route table:
   [App.tsx](../src/App.tsx#L1585).
 
 ### P3. Start only after consent
 
 - **What happens:** A checkbox inside the consent notice enables **I'm ready**.
-  The client starts a session with `consent: true`, a consent version, and
-  question IDs. The server checks consent and the question pool, refuses to
-  create a second active session, then stores the session.
+  The client requires consent and a valid question order before inserting the
+  session through Supabase. RLS scopes the inserted row to the signed-in user.
 - **Check:** Before accepting, verify the assessment has not started and the
   answer controls are unavailable. Accept and verify the first prompt appears
   only after the start request succeeds. If the request fails, report the
   visible error.
-- **Code:** Consent UI:
-  [App.tsx](../src/App.tsx#L569). Client start request:
-  [App.tsx](../src/App.tsx#L1219). Server consent/session creation:
-  [server/index.ts](../server/index.ts#L1006).
+- **Code:** Consent UI and session creation:
+  [App.tsx](../src/App.tsx) and
+  [assessment-data.ts](../src/features/assessment/assessment-data.ts).
 
 ### P4. Enter responses using the available input types
 
 - **What happens:** TPB reflection questions use text input; TTM questions use
   Yes/No buttons; additional questions may use numeric, single-choice, or
   multi-select controls. Multi-select keeps multiple options and makes
-  **None** exclusive. Answers are saved to the server before the next prompt
-  is queued. Server validation rejects invalid options and out-of-range ages.
+  **None** exclusive.   Answers are saved directly to Supabase before the next prompt is queued.
+  Client validation checks the supported answer shape; RLS enforces row
+  ownership.
 - **Check:** Exercise only the input types actually presented. Toggle a
   multi-select choice on and off, choose **None** and another option, and
   ensure the selection behaves exclusively. Verify invalid input or a network
@@ -241,16 +237,16 @@ and [server/index.ts](../server/index.ts#L98).
   [App.tsx](../src/App.tsx#L608). Question definitions:
   [pilot-survey-questions.ts](../src/data/pilot-survey-questions.ts#L111).
   Form controls and selected state:
-  [App.tsx](../src/App.tsx#L1462). Client submission/save:
-  [App.tsx](../src/App.tsx#L1306). Server answer validation and persistence:
-  [server/index.ts](../server/index.ts#L1095).
+  [App.tsx](../src/App.tsx#L1462). Client submission/save and persistence:
+  [App.tsx](../src/App.tsx#L1306) and
+  [assessment-data.ts](../src/features/assessment/assessment-data.ts).
 
 ### P5. Check progress, persistence, and errors
 
 - **What happens:** The chat displays answered count against the currently
   displayed question list, and a progress bar; loading/saving states disable
-  relevant controls. Answers are stored on the server and the dashboard gets
-  an applicable total from the API.
+  relevant controls. Answers and history are stored/read directly through
+  Supabase, with RLS enforcing ownership.
 - **Check:** Compare the progress count to the questions applicable to the
   selected branch; do not assume there are exactly 20 questions. If progress
   goes backward, advances without saving, or shows a contradictory total,
@@ -258,15 +254,15 @@ and [server/index.ts](../server/index.ts#L98).
 - **Code:** Chat count/progress:
   [App.tsx](../src/App.tsx#L1454). Loading/saving/error behavior:
   [App.tsx](../src/App.tsx#L1306). Applicable branch logic:
-  [App.tsx](../src/App.tsx#L614). Server dynamic question-count logic:
-  [server/index.ts](../server/index.ts#L194).
+  [App.tsx](../src/App.tsx#L614) and
+  [assessment-progress.ts](../src/features/assessment/assessment-progress.ts).
 
 ### P6. Pause and resume an in-progress reflection
 
-- **What happens:** On entering `/demo`, the client requests the current
-  in-progress session. If found, it restores the saved question order, answers,
-  and transcript; the dashboard offers **Resume reflection**. The server
-  returns only the signed-in user's active assessment. Starting over is a
+- **What happens:** On entering `/demo`, the client loads the current
+  in-progress session from Supabase. If found, it restores the saved question
+  order, answers, and transcript; the dashboard offers **Resume reflection**.
+  RLS scopes the query to the signed-in user. Starting over is a
   separate action that abandons an unfinished session after confirmation.
 - **Check:** Leave an unfinished test session, return to the dashboard, and
   resume. Verify prior answers and transcript return and there is no duplicate
@@ -275,10 +271,8 @@ and [server/index.ts](../server/index.ts#L98).
   abandoned.
 - **Code:** Client restoration:
   [App.tsx](../src/App.tsx#L1120). Dashboard resume link:
-  [App.tsx](../src/App.tsx#L897). Active-session endpoint:
-  [server/index.ts](../server/index.ts#L869). Confirm-and-abandon handler:
-  [App.tsx](../src/App.tsx#L1379) and
-  [server/index.ts](../server/index.ts#L1225).
+  [App.tsx](../src/App.tsx#L897). Active-session read and abandon persistence:
+  [assessment-data.ts](../src/features/assessment/assessment-data.ts).
 
 ### P7. Complete the participant assessment
 

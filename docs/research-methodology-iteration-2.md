@@ -223,7 +223,7 @@ production chat currently runs seven independent AI services.
 | Step | Intended method | Current implementation/status |
 |---|---|---|
 | 1. Conversational context collection | Gather TPB/TTM context and relevant user preferences and constraints | The live chat collects 62 ordered free-text answers (57 TPB items and five intention items). Recipe search is not exposed in the participant chat; the optional Pipeline Lab context box is not analyzed, sent, or saved. |
-| 2. TPB construct inference | Estimate attitude, subjective norm, and PBC from conversation text | Live app uses an experimental frozen-BERT/Ridge head to estimate a 1–7 rating for each non-skipped TPB answer; intention remains phrase-scored. The 1–7 ratings are linearly transformed to the profile's 0–100 display scale. The model was trained on 30 survey respondents, has not met validation targets, and uses questionnaire responses rather than free-form conversation history. The 38-item Part A lab text is not scored. A separate synthetic BERT test proposes a score for one Q1 response. |
+| 2. TPB construct inference | Estimate attitude, subjective norm, and PBC from conversation text | New live answers use keyword/phrase scoring; unmatched non-skipped answers receive 50 on the 0–100 scale and skips remain unscored. Missing scores in older records are recalculated when opened, while existing scores and historical BERT/Ridge ratings are preserved. The 38-item Part A lab text is not scored. A separate synthetic BERT test proposes a score for one Q1 response. |
 | 3. TTM stage estimation | Estimate one of five stages and track evidence/uncertainty | Live chat maps five phrase-scored intention answers to an ordinal stage. The lab has a deterministic conditional screening tree. No trained TTM model is implemented. |
 | 4. Intervention mode selection | Select a stage-appropriate intervention mode | No separate mode-selection service is implemented. The live coaching copy selects a stage-specific message and behavior-change-technique cue. |
 | 5. TPB-targeted intervention | Choose a target based on the weakest determinant and map to a technique | Live profile chooses the lowest sufficiently covered attitude/social-norm/PBC score with fixed tie order, then displays stage/factor-based coaching text. This is a fixed prototype mapping, not a validated intervention selector. |
@@ -239,22 +239,21 @@ intervention selection.
 
 ### Iteration 1: prototype design, development, testing, and review
 
-**Design and development — implemented:** the browser uses React/Vite; the
-Express API validates authenticated operations; Supabase Auth and Postgres
-store accounts and assessments. The participant question order is randomized
-and stored per session. The API checks ownership, status, expected answer
-order, and input bounds. RLS independently scopes participant rows to their
-owner and allows reviewers to read completed submissions.
+**Design and development — implemented:** the browser uses React/Vite;
+Supabase Auth and Postgres store accounts and assessments. Participant
+assessment reads and writes use the authenticated Supabase client, with RLS
+scoping rows to their owner; the client validates ownership, status, answer
+order, and input bounds for the supported UI flow. Reviewer mutations and
+recipe operations continue to use Express endpoints.
 
-For each non-skipped TPB answer, the live scorer sends the prompt and response
-to a local worker using frozen BERT mean-pooled embeddings and a respondent-
-trained Ridge head; its 1–7 rating is mapped to 0–100 for the profile.
-Intention answers use whole-phrase matching in five bands (0, 25, 50, 75,
-100), ignoring certain immediately negated phrases. At least three scoreable
-answers are required for each construct and at least three of five intention
-answers for the readiness estimate. Construct means and the weakest factor
-are computed deterministically. These methods are implemented for the
-prototype only.
+New participant answers use keyword/phrase scoring in the existing 0–100
+scale. Unmatched non-skipped answers receive 50 (the midpoint); skips remain
+unscored. Opening an older assessment lazily recalculates missing scores
+without overwriting saved scores or historical BERT/Ridge ratings. At least
+three scoreable answers are required for each construct and at least three of
+five intention answers for the readiness estimate. Construct means and the
+weakest factor are computed deterministically. These methods are implemented
+for the prototype only.
 
 **Separate lab components — implemented:** the Pipeline Lab contains the
 38-item free-text TPB form, conditional TTM tree, explicit Q1 human-review

@@ -47,7 +47,7 @@ describe("apiRequest authentication", () => {
         : jsonResponse(200, { ok: true });
     });
 
-    await expect(apiRequest("/api/assessments/active")).resolves.toEqual({ ok: true });
+    await expect(apiRequest("/api/reviewer/recipes")).resolves.toEqual({ ok: true });
 
     expect(authClient.refreshSession).toHaveBeenCalledOnce();
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -64,7 +64,7 @@ describe("apiRequest authentication", () => {
       error: Object.assign(new Error("Invalid Refresh Token"), { status: 400 }),
     });
 
-    await expect(apiRequest("/api/assessments/active")).rejects.toThrow(
+    await expect(apiRequest("/api/reviewer/recipes")).rejects.toThrow(
       "Your sign-in has expired. Please sign in again.",
     );
 
@@ -89,19 +89,19 @@ describe("apiRequest authentication", () => {
   it("does not refresh the session for non-authentication failures", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(403, { error: "Forbidden" }));
 
-    await expect(apiRequest("/api/assessments/active")).rejects.toThrow("Forbidden");
+    await expect(apiRequest("/api/reviewer/recipes")).rejects.toThrow("Forbidden");
 
     expect(authClient.refreshSession).not.toHaveBeenCalled();
   });
 
   it("shows server diagnostics and a reference ID for internal errors", async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(500, {
-      error: "Supabase is missing required database tables. Apply this project's migrations.",
+      error: "Recipe index is unavailable.",
       requestId: "request-123",
     }));
 
-    await expect(apiRequest("/api/assessments")).rejects.toThrow(
-      "Supabase is missing required database tables. Apply this project's migrations. (Reference: request-123)",
+    await expect(apiRequest("/api/reviewer/recipes")).rejects.toThrow(
+      "Recipe index is unavailable. (Reference: request-123)",
     );
   });
 });

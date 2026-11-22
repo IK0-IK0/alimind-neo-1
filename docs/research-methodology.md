@@ -6,23 +6,24 @@
 > validity, or a report of results. Replace the study-planning items below only
 > after the research team has made and documented those decisions.
 
-**Implementation snapshot:** 19 November 2026  
+**Implementation snapshot:** 22 November 2026  
 **Project:** AliMind browser-based nutrition coaching prototype
 
 ## 1. Study and product boundary
 
 AliMind is an educational software prototype for reflecting on healthy-eating
 attitudes, social support, perceived control, and intention. It combines an
-account-based conversational assessment, experimental BERT/Ridge scoring for
-TPB answers, phrase-based intention scoring, supportive coaching copy, an
-optional recipe search, and a reviewer workspace for completed submissions.
+account-based conversational assessment, keyword/phrase scoring, supportive
+coaching copy, an optional recipe search, and a reviewer workspace for
+completed submissions. Historical experimental BERT/Ridge ratings remain in
+older records but are not used to score new answers.
 
 The application is not a medical device, diagnostic tool, validated
-psychometric instrument, or autonomous clinical decision system. Its live
-TPB scorer is an experimental model trained on a 30-respondent questionnaire
-dataset; its evaluation did not meet the stated performance targets. Intention
-still uses hand-authored English phrase matching. No independent validation or
-effectiveness trial is documented in this repository. Do not write about
+psychometric instrument, or autonomous clinical decision system. The former
+live BERT/Ridge scorer was an experimental model trained on a 30-respondent
+questionnaire dataset; its evaluation did not meet the stated performance
+targets. New scores use hand-authored English keyword/phrase matching. No
+independent validation or effectiveness trial is documented in this repository. Do not write about
 recruitment, ethics approval, study outcomes, or efficacy as established facts.
 
 The product brief mentions adults aged 18–40 in Davao City as an earlier
@@ -35,12 +36,12 @@ described as one validated end-to-end algorithm:
 
 1. **Live participant chat (`/demo`):** 62 randomized open-text questions:
    57 TPB items across attitude, subjective norm/social support, and perceived
-   behavioral control, plus five intention items. The server uses an
-   experimental frozen-BERT/Ridge predictor for non-skipped TPB answers and
-   keeps intention on the phrase-matching path. TPB ratings are transformed
-   from 1–7 to the profile's 0–100 display scale; intention bands still feed
-   the provisional readiness estimate. The BERT predictor is trained on only
-   30 survey respondents and has not met the stated validation targets.
+   behavioral control, plus five intention items. New non-skipped answers use
+   keyword/phrase scoring; unmatched answers receive the neutral score of 50
+   on the 0–100 scale, while skipped answers remain unscored. Existing
+   scores and historical BERT/Ridge ratings in older records are preserved.
+   Missing scores on older answers are recalculated with the keyword scorer
+   when an assessment is opened.
 2. **TPB/TTM Pipeline Lab (`/pipeline-lab`, development only):** a separate
    38-item free-text TPB form and a conditional four-question Yes/No TTM
    screen. The Part A TPB text is not scored. A synthetic-only BERT experiment
@@ -70,10 +71,12 @@ into the editable draft for human review, without sending it to a participant.
 
 ### 3.1 Technology and routes
 
-- React and Vite provide the browser interface; an Express API handles
-  authenticated data operations and recipe requests.
-- Supabase Auth manages email/password accounts. The API validates the
-  bearer-token session with Supabase; it does not use a service-role key.
+- React and Vite provide the browser interface; participant assessment
+  reads/writes use the authenticated Supabase client directly. Express handles
+  reviewer mutations and recipe requests.
+- Supabase Auth manages email/password accounts. RLS scopes direct participant
+  data access to the signed-in user; no service-role key is exposed to the
+  browser.
 - `/demo` is the live assessment chat; `/reviewer` is the live reviewer
   workspace. `/reviewer-sample` and `/pipeline-lab` are development-only
   routes for fabricated examples and local experiments.
@@ -82,18 +85,17 @@ into the editable draft for human review, without sending it to a participant.
 ### 3.2 Live participant flow
 
 1. A participant signs in and sees storage-consent information before
-   creating a session. The API requires consent and the current consent
+   creating a session. The UI requires acceptance of the current consent
    version (`demo-supabase-v1`) before session creation.
 2. The browser randomizes the 62-item question order using Fisher–Yates
-   shuffling. The API checks that the submitted order is a complete,
-   duplicate-free permutation of the canonical question bank, then stores
-   that order with the assessment.
+   shuffling. The client checks that the order contains valid unique
+   question IDs, then stores it with the assessment through Supabase.
 3. One free-text question is presented at a time. An answer is saved before
-   the chat advances. The API verifies question order, session ownership,
-   session status, and input bounds. Non-skipped TPB answers are scored by the
-   frozen-BERT/Ridge worker; intention answers retain phrase scoring. Explicit
-   `skip`, `pass`, and `prefer not to answer` responses are stored as
-   unanswered.
+   the chat advances. The client checks question order, ownership, status,
+   input bounds, and the expected update timestamp. New answers use the
+   keyword scorer; unmatched answers receive 50, while explicit `skip`,
+   `pass`, and `prefer not to answer` responses remain unscored. RLS enforces
+   row ownership, but client validation is not a trusted security boundary.
 4. On completion, a rule-based bot message is saved and the UI presents the
    profile summary and supportive next step. This completion message is
    written by application code; it is not generated by a language model.
@@ -118,43 +120,28 @@ Question prompts and phrase groups are defined in
 | Perceived behavioral control | 21 | Control beliefs (10), perceived power (6), and direct PBC items (5) |
 | Intention | 5 | Commitment, willingness, effort, likelihood, and planning |
 
-The 57 TPB prompts are scored by the respondent-trained BERT/Ridge model;
-the five intention prompts retain hand-authored keyword/phrase groups. The
-training data contain 30 respondents and questionnaire explanations rather
-than open-ended chat histories. On five-fold respondent-held-out evaluation,
-the separate item-rating model scored MAE 0.865 and Pearson *r* 0.518 on its
-1–7 target; it did not meet the stated MAE < 0.5 and *r* > 0.70 targets.
-The model has not been validated for production or clinical use.
+All prompts use the shared English keyword/phrase scorer. The older
+respondent-trained BERT/Ridge model was trained on 30 respondents and
+questionnaire explanations rather than open-ended chat histories. On
+five-fold respondent-held-out evaluation, that separate historical model
+scored MAE 0.865 and Pearson *r* 0.518 on its 1–7 target; it did not meet the
+stated targets and is not used for new answers.
 
 ## 4. Live response scoring and profile derivation
 
 The implementation is in
 [`src/features/assessment/scoring.ts`](../src/features/assessment/scoring.ts).
-It contains shared profile derivation and intention phrase scoring; the server
-uses the local model worker for TPB answers.
+It contains shared profile derivation and keyword/phrase scoring for current
+answers.
 
 ### 4.1 TPB answer inference and intention phrase match
 
-For each non-skipped TPB answer:
-
-1. The API starts a local Python worker that loads the frozen
-   `bert-base-uncased` encoder and the Ridge head once per server process.
-2. It encodes the question prompt and response together, mean-pools token
-   embeddings with the attention mask, and predicts a continuous rating
-   clipped to `1–7`.
-3. The answer stores the experimental rating separately. For the existing
-   profile display, ratings are linearly mapped to `0–100` using
-   `(rating - 1) / 6 * 100`.
-
-The five intention answers continue to use hand-authored phrase matching in
-the `0`, `25`, `50`, `75`, and `100` bands. Unmatched intention answers and
-skips remain unscored. The model emits no calibrated confidence.
-
-The BERT/Ridge ratings are experimental estimates. The pilot dataset is small,
-responses are questionnaire explanations rather than free conversation, and
-the application prompts are not identical to the training survey statements.
-The model may misread paraphrases, mixed beliefs, negation, or language
-variation; its output is not calibrated confidence or a validated measure.
+For each non-skipped answer, the shared keyword scorer maps matching terms
+and phrases to the existing 0–100 score bands. When no phrase matches, the
+answer receives 50, the scale midpoint. Skipped answers remain unscored. Old
+assessments with missing scores are recalculated when opened, but an existing
+score or historical BERT/Ridge rating is preserved. These heuristic scores
+are not calibrated confidence or a validated measure.
 
 ### 4.2 Construct summaries and readiness stage
 

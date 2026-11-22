@@ -123,11 +123,13 @@ transcript and each question/answer pair. Starting a review automatically
 assigns it to the current reviewer; assignment/status and
 response/recommendation drafts are saved in separate Supabase tables, with
 draft access limited to the assigned reviewer until completion. Draft text is
-internal only and is not sent to the participant. TPB estimates come from the
-experimental respondent-trained BERT/Ridge model; intention and its
-readiness-stage estimate still use English phrase matching. These outputs are
-not validated TPB scores or clinical classifications; generated suggestions
-are editable coaching cues that must be checked against the conversation.
+internal only and is not sent to the participant. New assessment scores use
+keyword/phrase matching; unmatched non-skipped answers receive the neutral
+midpoint. Older saved BERT/Ridge ratings remain available, and old answers
+without a score are recalculated with the keyword scorer when opened. These
+outputs are not validated TPB scores or clinical classifications; generated
+suggestions are editable coaching cues that must be checked against the
+conversation.
 
 The reviewer recommendation field includes a RecipeNLG picker. It searches a
 local SQLite full-text index and copies the selected recipe's title,
@@ -184,8 +186,8 @@ in the ignored `.env.test-account.local` file; see [AGENTS.md](./AGENTS.md) for
 the testing convention. Do not use a personal account or real user data.
 
 On the local `/demo` page, the development-only **Run automated test** button
-shows a normal chat transcript filled with synthetic answers while the live
-TPB model and intention scorer run. The preview does not create or modify an
+shows a normal chat transcript filled with synthetic answers while the
+synthetic TPB experiment and intention scorer run. The preview does not create or modify an
 assessment; **Return to saved chat** restores the unchanged conversation. The
 first run may take longer while the local BERT worker loads.
 
@@ -211,10 +213,10 @@ Synthetic metrics and probabilities are not valid estimates for real people.
 
 The synthetic Q1 Python route is authenticated, disabled in production, and
 does not persist the submitted answer. Install the Python dependencies with
-`python -m pip install -r server/tpb/requirements.txt`. Both that experiment
-and the live TPB scorer use frozen BERT weights downloaded from Hugging Face
-and cached locally on first use; the live scorer also loads the bundled Ridge
-head in a persistent Python worker. The live head was trained on 1,701
+`python -m pip install -r server/tpb/requirements.txt`. The synthetic
+experiment uses frozen BERT weights downloaded from Hugging Face and cached
+locally on first use, then loads a temporary Ridge head. The older live head
+was trained on 1,701
 nonblank explanations from 30 respondents. Five-fold respondent-held-out
 evaluation yielded MAE 0.865 and Pearson *r* 0.518 on a 1–7 item-rating target,
 below the stated MAE < 0.5 and *r* > 0.70 targets. It is an experimental
@@ -246,7 +248,7 @@ The reusable live-answer confidence policy is in
 [`answer-confidence.ts`](./src/features/assessment/answer-confidence.ts).
 It accepts a model's score distribution and calibration evidence, asks for a
 clarification below its default 0.8 threshold or without approved validation,
-and preserves the current chat flow when no model is configured. This policy is not yet connected to production scoring: the live TPB scorer
+and preserves the current chat flow when no model is configured. This policy is not yet connected to production scoring: the current keyword scorer
 does not provide a calibrated score distribution, and the synthetic Pipeline
 Lab output must never be supplied as live confidence. Before adding
 confidence-driven clarifications, validate calibration and persist/replay
@@ -374,21 +376,18 @@ changing runtime variables alone does not update an existing frontend build.
   the user must accept the displayed storage consent.
 - Assessment order, answer text and provisional scores, chat messages, consent
   version/time, status, and timestamps are stored in Supabase Postgres.
-- The Express API validates request origin, question order, inputs, session
-  ownership, and answer scoring. It computes scores from the server's question
-  bank rather than trusting browser-supplied scores. Concurrent edits use an
-  optimistic timestamp check.
-- RLS policies scope database rows to `auth.uid()`. The server uses the
-  publishable key together with the caller's access token, not an elevated
-  service key. Users can read and modify only their own rows; RLS is the
-  database boundary, and the API's validation is the supported application
-  workflow.
-- Since the API uses the user's RLS-scoped access token, an owner could also
-  modify their own row directly through Supabase's Data API, bypassing the
-  app's server-side validation/scoring. This prototype does not treat scores
-  as tamper-proof or research-grade. A future trusted write path should use
-  narrowly scoped database functions or a server-only secret key, never a
-  service key in the browser.
+- Participant assessment reads and writes use the authenticated Supabase
+  client directly; RLS scopes participant rows to `auth.uid()`. Client-side
+  validation and optimistic timestamp checks keep the supported UI flow
+  consistent, but they are not a trusted security boundary.
+- Reviewer mutations, recipe generation/search, and the synthetic scoring
+  experiment still use Express endpoints where server-side operations or
+  provider access are needed. No service-role key is exposed to the browser.
+- Owners can call Supabase's Data API directly and alter their own rows within
+  the current RLS grants, bypassing client validation. This prototype does not
+  treat scores as tamper-proof or research-grade. A future trusted write path
+  should use narrowly scoped database functions or server-only credentials,
+  never a service key in the browser.
 - Refreshing or signing back in restores the user's latest in-progress
   assessment, or their latest completed conversation when none is in progress.
   The account page lists up to 50 sessions. Starting over marks an unfinished
@@ -402,18 +401,17 @@ changing runtime variables alone does not update an existing frontend build.
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/health` | API health check and configured storage provider. |
-| `GET` | `/api/assessments/active` | Latest in-progress assessment, or latest completed conversation. |
-| `GET` | `/api/assessments` | Up to 50 owner-scoped history summaries. |
-| `GET` | `/api/assessments/:id` | Owner-scoped assessment detail. |
-| `POST` | `/api/assessments` | Create an assessment after the current consent is accepted. |
-| `POST` | `/api/assessments/:id/answers` | Save the next ordered answer; score is computed on the server. |
-| `POST` | `/api/assessments/:id/messages` | Persist an assistant or completed-session chat message. |
-| `POST` | `/api/assessments/:id/abandon` | Mark an unfinished assessment abandoned without deleting it. |
+| `GET` | `/api/reviewer/recipes` | Search the server-side recipe index for reviewers. |
+| `POST` | `/api/reviewer/assessments/:id/start` | Claim a completed submission and initialize its reviewer draft. |
+| `PATCH` | `/api/reviewer/assessments/:id/draft` | Save an assigned review draft. |
+| `POST` | `/api/reviewer/assessments/:id/complete` | Complete and deliver an assigned review. |
+| `POST` | `/api/recipes/generate` | Generate a recipe response using server-side provider configuration. |
+| `POST` | `/api/tpb/q1-experiment` | Run the local-only TPB Q1 experiment. |
+| `POST` | `/api/dev/tpb-scoring-test` | Run the local-only synthetic scoring test. |
 
 Protected API calls require `Authorization: Bearer <Supabase access token>`.
-Assessment mutation calls also require an allowed `Origin`. The API filters
-queries by the verified Supabase user ID; RLS independently enforces row
-ownership.
+The assessment chat uses the Supabase client directly; its row access is
+restricted by RLS policies.
 
 ## Data migration and privacy boundary
 
@@ -429,14 +427,13 @@ trained on a small respondent survey dataset, but it has not been validated
 for research or operational decisions. Do not enter identifying or sensitive
 health information.
 
-The live assessment uses an experimental BERT/Ridge model for 57 TPB items and
-English-language phrase matching for five intention items. It is not a
-validated psychometric instrument, does not diagnose a condition, and must not
-be used for medical decisions. Skipped answers remain unscored rather than
-being treated as neutral. Construct estimates are withheld until at least
-three items have scoreable answers. The TPB encoder runs through a local
-Python worker; the app does not send assessment text to an external inference
-provider.
+The live assessment uses English-language keyword/phrase scoring across the
+questionnaire. An unmatched non-skipped answer receives a neutral midpoint
+score; skipped answers remain unscored. Existing experimental BERT/Ridge
+ratings are preserved, while old answers without a score are recalculated by
+the keyword scorer when opened. The instrument is not validated, does not
+diagnose a condition, and must not be used for medical decisions. Construct
+estimates are withheld until at least three items have scoreable answers.
 
 Before collecting additional participant data or using the system in a study,
 implement and review the production requirements in the remake plan, including

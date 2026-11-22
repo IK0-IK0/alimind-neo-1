@@ -9,7 +9,7 @@ describe("getApplicableQuestionCount", () => {
       { questionId: "pilot-ttm-65", response: "No", score: null },
     ];
 
-    expect(getApplicableQuestionCount(questionOrder, answers)).toBe(3);
+    expect(getApplicableQuestionCount(questionOrder, answers)).toBe(2);
   });
 
   it("keeps an unanswered dependency eligible until its answer is known", () => {

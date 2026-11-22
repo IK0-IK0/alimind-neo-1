@@ -577,14 +577,14 @@ function TypingIndicator() {
   );
 }
 
-function ConsentNotice({ onStart, disabled = false }: { onStart: () => void; disabled?: boolean }) {
+function ConsentNotice({ onStart, disabled = false }: { onStart: (accepted: boolean) => void; disabled?: boolean }) {
   const [accepted, setAccepted] = useState(false);
   return (
     <div className="consent-box">
       <div className="consent-heading"><ShieldCheck size={17} /><strong>Before we begin</strong></div>
       <p>Your answers and chat messages will be saved to the configured Supabase project and linked to your account, so you can resume later. Don’t include identifying or sensitive health information. This demo isn’t medical advice.</p>
       <label className="consent-check"><Checkbox id="demo-consent" checked={accepted} onCheckedChange={setAccepted} /><span>I understand and agree to continue with this demo.</span></label>
-      <Button className="button button-dark consent-button" disabled={!accepted || disabled} onClick={onStart}>I’m ready <ArrowRight size={15} /></Button>
+      <Button className="button button-dark consent-button" disabled={!accepted || disabled} onClick={() => onStart(accepted)}>I’m ready <ArrowRight size={15} /></Button>
     </div>
   );
 }
@@ -1201,7 +1201,7 @@ function DemoPage() {
     }, delay);
   }
 
-  async function startAssessment() {
+  async function startAssessment(consentAccepted: boolean) {
     if (isTyping || isSaving || isLoadingAssessment || isScoringTestRunning) return;
     setIsSaving(true);
     setSaveError("");
@@ -1220,6 +1220,7 @@ function DemoPage() {
       const assessment = await createAssessment(
         user.id,
         questionPool.map((question) => question.id),
+        consentAccepted,
       );
       const questionById = new Map(questionPool.map((question) => [question.id, question]));
       const savedQuestionPool = assessment.questionOrder.map((questionId) => {
@@ -1442,7 +1443,7 @@ function DemoPage() {
               {displayedMessages.map((message) => <ChatBubble key={message.id} message={message} />)}
               {!isScoringTestPreview && isLoadingAssessment && <div className="loading-assessment" role="status">Loading your saved conversation…</div>}
               {isTyping && <TypingIndicator />}
-              {!isScoringTestPreview && !started && !isLoadingAssessment && <ConsentNotice onStart={() => void startAssessment()} disabled={isTyping || isSaving || isScoringTestRunning} />}
+              {!isScoringTestPreview && !started && !isLoadingAssessment && <ConsentNotice onStart={(accepted) => void startAssessment(accepted)} disabled={isTyping || isSaving || isScoringTestRunning} />}
               {displayedComplete && <CompletionCard synthetic={isScoringTestPreview} />}
             </div>
             <form className="chat-compose" onSubmit={submit}>

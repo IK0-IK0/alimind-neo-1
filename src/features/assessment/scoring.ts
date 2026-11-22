@@ -147,9 +147,10 @@ export function shuffleQuestions<T>(items: readonly T[], random = Math.random): 
 
 export function makeAnswer(question: Question, response: string): Answer {
   const isSkipped = /^(skip|prefer not to answer|pass)$/i.test(response.trim());
+  const score = response.trim() && !isSkipped ? scoreResponse(question, response) ?? 50 : null;
   return {
     questionId: question.id,
     response: response.trim() && !isSkipped ? response.trim() : null,
-    score: response.trim() && !isSkipped ? scoreResponse(question, response) : null,
+    score,
   };
 }
