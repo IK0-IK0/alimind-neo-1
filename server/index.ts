@@ -142,6 +142,24 @@ function requireString(value: unknown, maximum: number): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maximum;
 }
 
+function getErrorField(error: unknown, field: "code" | "message" | "name") {
+  if (typeof error !== "object" || error === null || !(field in error)) return undefined;
+  const value = (error as Record<string, unknown>)[field];
+  return typeof value === "string" ? value : undefined;
+}
+
+function publicErrorMessage(error: unknown) {
+  switch (getErrorField(error, "code")) {
+    case "42P01":
+    case "PGRST205":
+      return "Supabase is missing required database tables. Apply this project's migrations.";
+    case "42501":
+      return "Supabase denied database access. Check the project's grants and row-level security policies.";
+    default:
+      return "The server could not complete this request. Check the matching Vercel Function log.";
+  }
+}
+
 function arrayFromJson<T>(value: Json, label: string): T[] {
   if (!Array.isArray(value)) throw new Error(`Stored ${label} data is not a JSON array.`);
   return value as T[];
@@ -1368,6 +1386,10 @@ app.post("/api/assessments/:id/messages", requireSameOrigin, async (req, res, ne
   }
 });
 
+app.use("/api", (req, res) => {
+  sendError(res, 404, `No API route matches ${req.method} ${req.path}.`);
+});
+
 if (process.env.NODE_ENV === "production") {
   app.use(express.static(resolve(root, "dist"), { index: false, maxAge: "1h" }));
   app.use((req, res, next) => {
@@ -1379,10 +1401,21 @@ if (process.env.NODE_ENV === "production") {
   });
 }
 
-app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
-  console.error("Request failed", error instanceof Error ? error.name : "UnknownError");
-  if (res.headersSent) return;
-  sendError(res, 500, "The request could not be completed. Please try again.");
+app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
+  const requestId = randomUUID();
+  console.error("API request failed", JSON.stringify({
+    requestId,
+    method: req.method,
+    route: req.route?.path ?? "unmatched",
+    name: getErrorField(error, "name") ?? "UnknownError",
+    code: getErrorField(error, "code"),
+    message: getErrorField(error, "message") ?? String(error),
+  }));
+  if (res.headersSent) {
+    next(error);
+    return;
+  }
+  res.status(500).json({ error: publicErrorMessage(error), requestId });
 });
 
 export default app;

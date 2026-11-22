@@ -49,15 +49,19 @@ export async function apiRequest<T>(
     }
   }
 
-  const payload = await response.json().catch(() => null) as { error?: string } | T | null;
+  const payload: unknown = await response.json().catch(() => null);
   if (!response.ok) {
-    const errorMessage = payload && typeof payload === "object" && "error" in payload
-      ? payload.error
+    const errorPayload = typeof payload === "object" && payload !== null
+      ? payload as Record<string, unknown>
       : undefined;
+    const errorMessage = errorPayload?.error;
+    const requestId = errorPayload?.requestId;
     const message = typeof errorMessage === "string"
       ? errorMessage
       : `Request failed (${response.status}).`;
-    throw new Error(message);
+    throw new Error(
+      typeof requestId === "string" ? `${message} (Reference: ${requestId})` : message,
+    );
   }
   if (!payload) throw new Error("The server returned an empty response.");
   return payload as T;
