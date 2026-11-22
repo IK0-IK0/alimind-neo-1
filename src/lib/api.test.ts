@@ -6,7 +6,7 @@ const authClient = vi.hoisted(() => ({
   signOut: vi.fn(),
 }));
 
-vi.mock("../auth/client", () => ({ authClient }));
+vi.mock("../auth/client", () => ({ getAuthClient: () => authClient }));
 
 import { apiRequest } from "./api";
 

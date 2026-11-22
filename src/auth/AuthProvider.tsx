@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { User } from "@supabase/supabase-js";
-import { authClient } from "./client";
+import { getAuthClient } from "./client";
+import { isSupabaseConfigured, SUPABASE_CONFIG_ERROR } from "../lib/supabase/client";
 
 type AuthContextValue = {
   user: User | null;
@@ -17,7 +18,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isSupabaseConfigured()) {
+      setIsPending(false);
+      setError(SUPABASE_CONFIG_ERROR);
+      return;
+    }
+
     let active = true;
+    const authClient = getAuthClient();
     const { data: { subscription } } = authClient.onAuthStateChange((_event, session) => {
       if (!active) return;
       setUser(session?.user ?? null);
@@ -44,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function refresh() {
-    const { data, error: sessionError } = await authClient.getSession();
+    const { data, error: sessionError } = await getAuthClient().getSession();
     if (sessionError) {
       setError(sessionError.message);
       throw sessionError;

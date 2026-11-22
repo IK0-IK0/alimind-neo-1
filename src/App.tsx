@@ -64,7 +64,7 @@ import {
   Progress,
 } from "./components/ui/primitives";
 import { useAuth } from "./auth/AuthProvider";
-import { authClient, supabase } from "./auth/client";
+import { getAuthClient, getSupabaseClient } from "./auth/client";
 import { apiRequest } from "./lib/api";
 
 type ChatMessage = { id: number; sender: "bot" | "user"; text: string };
@@ -156,7 +156,7 @@ function Header() {
 
   async function signOut() {
     try {
-      const { error } = await authClient.signOut();
+      const { error } = await getAuthClient().signOut();
       if (error) throw error;
       await refresh();
       navigate("/");
@@ -267,7 +267,7 @@ function ProfileSettingsDialog({
     setProfileError("");
     setProfileSaved(false);
     try {
-      const { error } = await authClient.updateUser({ data: { name: nextName } });
+      const { error } = await getAuthClient().updateUser({ data: { name: nextName } });
       if (error) throw error;
       await onUserUpdated();
       setProfileSaved(true);
@@ -296,12 +296,12 @@ function ProfileSettingsDialog({
     setPasswordError("");
     setPasswordSaved(false);
     try {
-      const { error: verifyError } = await authClient.signInWithPassword({
+      const { error: verifyError } = await getAuthClient().signInWithPassword({
         email: user.email,
         password: currentPassword,
       });
       if (verifyError) throw new Error("Current password is incorrect.");
-      const { error: updateError } = await authClient.updateUser({ password: newPassword });
+      const { error: updateError } = await getAuthClient().updateUser({ password: newPassword });
       if (updateError) throw updateError;
       await onUserUpdated();
       setPasswordSaved(true);
@@ -680,7 +680,7 @@ function AuthPage({ mode }: { mode: "login" | "register" }) {
     setError("");
     try {
       if (isRegister) {
-        const { data, error: signUpError } = await authClient.signUp({
+        const { data, error: signUpError } = await getAuthClient().signUp({
           email: email.trim(),
           password,
           options: {
@@ -692,7 +692,7 @@ function AuthPage({ mode }: { mode: "login" | "register" }) {
           throw new Error("Supabase did not create an active session because email confirmation is required. Disable Confirm email under Authentication → Providers → Email; the profiles table cannot override this Auth setting.");
         }
       } else {
-        const { error: signInError } = await authClient.signInWithPassword({
+        const { error: signInError } = await getAuthClient().signInWithPassword({
           email: email.trim(),
           password,
         });
@@ -842,7 +842,7 @@ function DashboardPage() {
     setProfileError("");
     void (async () => {
       try {
-        const { data, error: requestError } = await supabase
+        const { data, error: requestError } = await getSupabaseClient()
           .from("profiles")
           .select("display_name")
           .eq("id", user.id)

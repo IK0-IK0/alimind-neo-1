@@ -5,6 +5,15 @@ import type { Database } from "./types";
 let client: SupabaseClient<Database> | undefined;
 
 const AUTH_REQUEST_TIMEOUT_MS = 15_000;
+export const SUPABASE_CONFIG_ERROR =
+  "Supabase isn't configured. Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in the deployment's build environment, then rebuild.";
+
+export function isSupabaseConfigured() {
+  return Boolean(
+    import.meta.env.VITE_SUPABASE_URL &&
+    import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+  );
+}
 
 async function fetchWithAuthTimeout(input: RequestInfo | URL, init?: RequestInit) {
   const requestUrl = typeof input === "string"
@@ -53,7 +62,7 @@ export function createClient() {
     const url = import.meta.env.VITE_SUPABASE_URL;
     const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
     if (!url || !publishableKey) {
-      throw new Error("Set VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY in .env before starting AliMind.");
+      throw new Error(SUPABASE_CONFIG_ERROR);
     }
     client = createBrowserClient<Database, "public">(url, publishableKey, {
       global: { fetch: fetchWithAuthTimeout },

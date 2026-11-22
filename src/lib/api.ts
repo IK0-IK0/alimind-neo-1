@@ -1,9 +1,10 @@
-import { authClient } from "../auth/client";
+import { getAuthClient } from "../auth/client";
 
 export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  const authClient = getAuthClient();
   const { data: sessionData, error: sessionError } = await authClient.getSession();
   if (sessionError) throw sessionError;
   if (!sessionData.session) {

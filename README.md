@@ -336,6 +336,10 @@ provider secrets such as `SPOONACULAR_API_KEY` only in Vercel's runtime
 environment. After pushing these changes, the connected Vercel Git project
 should create a new deployment.
 
+Vite embeds `VITE_` variables at build time. Add both Supabase variables to the
+Vercel project's Production (and Preview, if used) environment, then redeploy;
+changing runtime variables alone does not update an existing frontend build.
+
 ### Environment variables
 
 | Variable | Required | Default | Description |
