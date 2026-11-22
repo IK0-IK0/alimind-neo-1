@@ -39,9 +39,13 @@ import {
   type Profile,
 } from "./features/assessment/scoring";
 import {
+  abandonAssessment,
+  createAssessment,
   loadActiveAssessment,
   loadAssessmentDetail,
   loadAssessmentHistory,
+  saveAssessmentMessage,
+  ASSESSMENT_CONSENT_VERSION,
   type AssessmentSessionDetail,
   type AssessmentSummary,
 } from "./features/assessment/assessment-data";
@@ -1175,11 +1179,14 @@ function DemoPage() {
       void (async () => {
         try {
           if (!id) throw new Error("Your assessment session isn’t ready. Please try again.");
-          const result = await apiRequest<{ assessment: { messages: ChatMessage[] } }>(
-            `/api/assessments/${id}/messages`,
-            { method: "POST", body: JSON.stringify({ sender: "bot", text, completed: completesAssessment, messageId }) },
-          );
-          setMessages(result.assessment.messages);
+          if (!user) throw new Error("Please sign in to continue.");
+          const nextMessages = await saveAssessmentMessage(user.id, id, {
+            sender: "bot",
+            text,
+            completed: completesAssessment,
+            messageId,
+          });
+          setMessages(nextMessages);
           setPendingBotText(null);
           setPendingBotMessageId(null);
           if (completesAssessment) setComplete(true);
@@ -1199,6 +1206,7 @@ function DemoPage() {
     setIsSaving(true);
     setSaveError("");
     try {
+      if (!user) throw new Error("Please sign in to start an assessment.");
       const currentTpbQuestions = questions.filter(isTpbQuestion);
       const orderedTpbQuestions = currentTpbQuestions.length === QUESTIONS.length
         ? currentTpbQuestions
@@ -1209,16 +1217,10 @@ function DemoPage() {
         ...PILOT_ADDITIONAL_QUESTIONS,
       ];
       setQuestions(questionPool);
-      const { assessment } = await apiRequest<{
-        assessment: { id: string; questionOrder: string[]; messages: ChatMessage[] };
-      }>("/api/assessments", {
-        method: "POST",
-        body: JSON.stringify({
-          consent: true,
-          consentVersion: "demo-supabase-v1",
-          questionOrder: questionPool.map((question) => question.id),
-        }),
-      });
+      const assessment = await createAssessment(
+        user.id,
+        questionPool.map((question) => question.id),
+      );
       const questionById = new Map(questionPool.map((question) => [question.id, question]));
       const savedQuestionPool = assessment.questionOrder.map((questionId) => {
         const question = questionById.get(questionId);
@@ -1297,11 +1299,13 @@ function DemoPage() {
         pendingFollowUp.current = { text, id: crypto.randomUUID() };
       }
       try {
-        const { assessment } = await apiRequest<{ assessment: { messages: ChatMessage[] } }>(
-          `/api/assessments/${assessmentId}/messages`,
-          { method: "POST", body: JSON.stringify({ sender: "user", text, messageId: pendingFollowUp.current.id }) },
-        );
-        setMessages(assessment.messages);
+        if (!user) throw new Error("Please sign in to continue.");
+        const nextMessages = await saveAssessmentMessage(user.id, assessmentId, {
+          sender: "user",
+          text,
+          messageId: pendingFollowUp.current.id,
+        });
+        setMessages(nextMessages);
         setInput("");
         pendingFollowUp.current = null;
         queueBot("Thanks for sharing. I can offer ideas based on your assessment snapshot, but this prototype doesn't re-score follow-up chat messages. What feels like the smallest helpful step for you?", assessmentId);
@@ -1361,7 +1365,8 @@ function DemoPage() {
     setSaveError("");
     try {
       if (assessmentId && !complete) {
-        await apiRequest(`/api/assessments/${assessmentId}/abandon`, { method: "POST" });
+        if (!user) throw new Error("Please sign in to continue.");
+        await abandonAssessment(user.id, assessmentId);
       }
       if (typingTimer.current !== null) window.clearTimeout(typingTimer.current);
       typingTimer.current = null;
