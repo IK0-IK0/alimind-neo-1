@@ -7,7 +7,7 @@ import {
 import { arrayFromJson } from "../../lib/supabase/json";
 import type { AssessmentRecord } from "../../lib/supabase/types";
 import { getApplicableQuestionCount } from "./assessment-progress";
-import type { Answer } from "./scoring";
+import { makeAnswer, type Answer } from "./scoring";
 
 type StoredMessage = { id: string; sender: "bot" | "user"; text: string };
 
@@ -252,6 +252,119 @@ export async function abandonAssessment(userId: string, assessmentId: string) {
   if (!data) {
     throw new Error("This assessment changed in another request. Refresh and try again.");
   }
+}
+
+export async function saveAssessmentAnswer(
+  userId: string,
+  assessmentId: string,
+  questionId: string,
+  response: string | null,
+): Promise<{ answers: Answer[]; messages: StoredMessage[] }> {
+  const { data: row, error: readError } = await getSupabaseClient()
+    .from("assessment_sessions")
+    .select("*")
+    .eq("id", assessmentId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (readError) throw readError;
+  if (!row) throw new Error("Assessment not found.");
+  if (row.status !== "in_progress") {
+    throw new Error("This assessment is not accepting answers.");
+  }
+  if (
+    typeof questionId !== "string" ||
+    response !== null && (
+      typeof response !== "string" ||
+      response.length === 0 ||
+      response.length > 1000 ||
+      response.trim().length === 0
+    )
+  ) {
+    throw new Error("The assessment answer is invalid.");
+  }
+  if (!row.question_order.includes(questionId)) {
+    throw new Error("The assessment question is invalid.");
+  }
+
+  const answers = arrayFromJson<Answer>(row.answers, "answer");
+  const messages = arrayFromJson<StoredMessage>(row.messages, "message");
+  const ttmQuestion = PILOT_TTM_QUESTIONS.find((item) => item.id === questionId);
+  if (ttmQuestion && response !== "Yes" && response !== "No") {
+    throw new Error("Stage-of-change answers must be Yes or No.");
+  }
+  const additionalQuestion = PILOT_ADDITIONAL_QUESTIONS.find((item) => item.id === questionId);
+  if (additionalQuestion) {
+    const validAdditionalResponse = additionalQuestion.type === "number"
+      ? typeof response === "string" && /^\d{1,3}$/.test(response) && Number(response) >= 1 && Number(response) <= 120
+      : additionalQuestion.type === "singleSelect"
+        ? typeof response === "string" && additionalQuestion.options?.includes(response) === true
+        : additionalQuestion.type === "multiSelect" && typeof response === "string"
+          ? (() => {
+              const selectedOptions = response.split(" | ");
+              return selectedOptions.length > 0
+                && selectedOptions.every((option) => additionalQuestion.options?.includes(option) === true)
+                && new Set(selectedOptions).size === selectedOptions.length
+                && (!selectedOptions.includes("None") || selectedOptions.length === 1);
+            })()
+          : false;
+    if (!validAdditionalResponse) {
+      throw new Error("Choose a valid response from the available additional-question options.");
+    }
+  }
+
+  const previousAnswer = answers.find((answer) => answer.questionId === questionId);
+  if (previousAnswer) {
+    if (previousAnswer.response !== response) {
+      throw new Error("That question has already been answered differently.");
+    }
+    return { answers, messages };
+  }
+
+  if (ttmQuestion?.dependsOn) {
+    const dependencyAnswer = answers.find((answer) =>
+      answer.questionId === `pilot-ttm-${String(ttmQuestion.dependsOn?.questionNumber).padStart(2, "0")}`,
+    );
+    const dependencyMatches = dependencyAnswer?.response?.trim().toLowerCase()
+      === (ttmQuestion.dependsOn.answer ? "yes" : "no");
+    if (!dependencyMatches) {
+      throw new Error("That stage-of-change question is not applicable to your prior answer.");
+    }
+  }
+
+  const question = QUESTIONS.find((item) => item.id === questionId);
+  const answer: Answer = question && response !== null
+    ? makeAnswer(question, response)
+    : { questionId, response, score: null };
+  const nextAnswers = [...answers, answer];
+  const nextMessages = [
+    ...messages,
+    {
+      id: crypto.randomUUID(),
+      sender: "user" as const,
+      text: response ?? "Prefer not to answer",
+    },
+  ];
+  const { data, error } = await getSupabaseClient()
+    .from("assessment_sessions")
+    .update({
+      answers: nextAnswers,
+      messages: nextMessages,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", row.id)
+    .eq("user_id", userId)
+    .eq("status", "in_progress")
+    .eq("updated_at", row.updated_at)
+    .select("*")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    throw new Error("This assessment changed in another request. Refresh and try again.");
+  }
+  return {
+    answers: arrayFromJson<Answer>(data.answers, "answer"),
+    messages: arrayFromJson<StoredMessage>(data.messages, "message"),
+  };
 }
 
 export async function loadAssessmentHistory(userId: string): Promise<AssessmentSummary[]> {

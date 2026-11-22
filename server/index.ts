@@ -4,10 +4,8 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type { User } from "@supabase/supabase-js";
 import type {
-  AssessmentRecord,
   AssessmentReviewRecord,
   AssessmentReviewDraftRecord,
-  AssessmentStatus,
   Json,
 } from "../src/lib/supabase/types";
 import { QUESTIONS } from "../src/data/questionnaire.js";
@@ -158,36 +156,6 @@ function publicErrorMessage(error: unknown) {
 function arrayFromJson<T>(value: Json, label: string): T[] {
   if (!Array.isArray(value)) throw new Error(`Stored ${label} data is not a JSON array.`);
   return value as T[];
-}
-
-function publicAssessment(row: AssessmentRecord) {
-  return {
-    id: row.id,
-    status: row.status,
-    questionOrder: row.question_order,
-    answers: arrayFromJson<Answer>(row.answers, "answer"),
-    messages: arrayFromJson<StoredMessage>(row.messages, "message"),
-    consentVersion: row.consent_version,
-    consentAcceptedAt: row.consent_accepted_at,
-    startedAt: row.started_at,
-    updatedAt: row.updated_at,
-    completedAt: row.completed_at,
-  };
-}
-
-async function getOwnedAssessment(
-  client: UserSupabaseClient,
-  id: string,
-  userId: string,
-) {
-  const { data, error } = await client
-    .from("assessment_sessions")
-    .select("*")
-    .eq("id", id)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
 }
 
 function getAssessmentId(req: Request, res: Response): string | null {
@@ -708,136 +676,6 @@ app.post("/api/recipes/generate", requireSameOrigin, async (req, res, next) => {
       throw error;
     }
   } catch (error) {
-    next(error);
-  }
-});
-
-app.post("/api/assessments/:id/answers", requireSameOrigin, async (req, res, next) => {
-  try {
-    const context = await requireUser(req, res);
-    if (!context) return;
-    const { client, user } = context;
-    const id = getAssessmentId(req, res);
-    if (!id) return;
-    const row = await getOwnedAssessment(client, id, user.id);
-    if (!row) {
-      sendError(res, 404, "Assessment not found.");
-      return;
-    }
-    if (row.status !== "in_progress") {
-      sendError(res, 409, "This assessment is not accepting answers.");
-      return;
-    }
-
-    const answers = arrayFromJson<Answer>(row.answers, "answer");
-    const { questionId, response } = req.body ?? {};
-    if (
-      typeof questionId !== "string" ||
-      response !== null && (!requireString(response, 1000) || response.trim().length === 0)
-    ) {
-      sendError(res, 400, "The assessment answer is invalid.");
-      return;
-    }
-    if (!row.question_order.includes(questionId)) {
-      sendError(res, 400, "The assessment question is invalid.");
-      return;
-    }
-    const ttmQuestion = PILOT_TTM_QUESTIONS.find((item) => item.id === questionId);
-    if (ttmQuestion && response !== "Yes" && response !== "No") {
-      sendError(res, 400, "Stage-of-change answers must be Yes or No.");
-      return;
-    }
-    const additionalQuestion = PILOT_ADDITIONAL_QUESTIONS.find((item) => item.id === questionId);
-    if (additionalQuestion) {
-      const validAdditionalResponse = additionalQuestion.type === "number"
-        ? typeof response === "string" && /^\d{1,3}$/.test(response) && Number(response) >= 1 && Number(response) <= 120
-        : additionalQuestion.type === "singleSelect"
-          ? typeof response === "string" && additionalQuestion.options?.includes(response) === true
-          : additionalQuestion.type === "multiSelect" && typeof response === "string"
-            ? (() => {
-                const selectedOptions = response.split(" | ");
-                return selectedOptions.length > 0
-                  && selectedOptions.every((option) => additionalQuestion.options?.includes(option) === true)
-                  && new Set(selectedOptions).size === selectedOptions.length
-                  && (!selectedOptions.includes("None") || selectedOptions.length === 1);
-              })()
-            : false;
-      if (!validAdditionalResponse) {
-        sendError(res, 400, "Choose a valid response from the available additional-question options.");
-        return;
-      }
-    }
-    const previousAnswer = answers.find((answer) => answer.questionId === questionId);
-    if (previousAnswer) {
-      if (previousAnswer.response !== response) {
-        sendError(res, 409, "That question has already been answered differently.");
-        return;
-      }
-      res.setHeader("Cache-Control", "private, no-store");
-      res.json({ assessment: publicAssessment(row) });
-      return;
-    }
-
-    if (ttmQuestion?.dependsOn) {
-      const dependencyAnswer = answers.find((answer) =>
-        answer.questionId === `pilot-ttm-${String(ttmQuestion.dependsOn?.questionNumber).padStart(2, "0")}`,
-      );
-      const dependencyMatches = dependencyAnswer?.response?.trim().toLowerCase()
-        === (ttmQuestion.dependsOn.answer ? "yes" : "no");
-      if (!dependencyMatches) {
-        sendError(res, 409, "That stage-of-change question is not applicable to your prior answer.");
-        return;
-      }
-    }
-
-    const question = QUESTIONS.find((item) => item.id === questionId);
-    let score: Answer["score"] = null;
-    let tpbModelRating: number | null = null;
-    if (question) {
-      score = response === null || question.construct !== "intention"
-        ? null
-        : scoreResponse(question, response);
-      tpbModelRating = response !== null && question.construct !== "intention"
-        ? await scoreTpbAnswer(question.prompt, response)
-        : null;
-    }
-    const answer: Answer = {
-      questionId,
-      response,
-      score,
-      ...(question && question.construct !== "intention" ? { tpbModelRating } : {}),
-    };
-    const nextAnswers = [...answers, answer];
-    const messages = arrayFromJson<StoredMessage>(row.messages, "message");
-    const nextMessages: StoredMessage[] = [
-      ...messages,
-      { id: randomUUID(), sender: "user", text: response ?? "Prefer not to answer" },
-    ];
-    const { data, error } = await client
-      .from("assessment_sessions")
-      .update({
-        answers: nextAnswers as Json,
-        messages: nextMessages as Json,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", row.id)
-      .eq("user_id", user.id)
-      .eq("status", "in_progress")
-      .eq("updated_at", row.updated_at)
-      .select("*")
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) {
-      sendError(res, 409, "This assessment changed in another request. Refresh and try again.");
-      return;
-    }
-    res.setHeader("Cache-Control", "private, no-store");
-    res.json({ assessment: publicAssessment(data) });
-  } catch (error) {
-    if (error instanceof TpbAnswerScorerError) {
-      sendError(res, error.status, error.message);
-      return;
-    }
     next(error);
   }
 });

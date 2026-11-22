@@ -45,7 +45,7 @@ import {
   loadAssessmentDetail,
   loadAssessmentHistory,
   saveAssessmentMessage,
-  ASSESSMENT_CONSENT_VERSION,
+  saveAssessmentAnswer,
   type AssessmentSessionDetail,
   type AssessmentSummary,
 } from "./features/assessment/assessment-data";
@@ -1329,18 +1329,21 @@ function DemoPage() {
     setIsSaving(true);
     setSaveError("");
     try {
-      const { assessment } = await apiRequest<{ assessment: { answers: Answer[]; messages: ChatMessage[] } }>(
-        `/api/assessments/${assessmentId}/answers`,
-        { method: "POST", body: JSON.stringify({ questionId: answer.questionId, response: answer.response }) },
+      if (!user) throw new Error("Please sign in to continue.");
+      const { answers: savedAnswers, messages: savedMessages } = await saveAssessmentAnswer(
+        user.id,
+        assessmentId,
+        answer.questionId,
+        answer.response,
       );
-      setAnswers(assessment.answers);
-      setMessages(assessment.messages);
+      setAnswers(savedAnswers);
+      setMessages(savedMessages);
       setInput("");
-      const savedAnswer = assessment.answers[assessment.answers.length - 1];
-      const nextQuestion = getApplicableLiveQuestions(questions, assessment.answers)
-        .find((question) => !assessment.answers.some((item) => item.questionId === question.id));
+      const savedAnswer = savedAnswers[savedAnswers.length - 1];
+      const nextQuestion = getApplicableLiveQuestions(questions, savedAnswers)
+        .find((question) => !savedAnswers.some((item) => item.questionId === question.id));
       if (!nextQuestion) {
-        const finalProfile = getLiveProfile(questions, assessment.answers);
+        const finalProfile = getLiveProfile(questions, savedAnswers);
         queueBot(
           `Thank you for sharing so openly. That's the full assessment. Your snapshot is ready below—it's a simple, provisional estimate, not a clinical assessment. ${finalProfile.stage ? `Your current readiness looks like ${finalProfile.stage.toLowerCase()}.` : "There weren't enough matched responses to estimate readiness."}`,
           assessmentId,
